@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Water Park Rush</title>
+<style>
+  :root{--sky:#78d8ff;--water:#16b8e8;--deep:#0879c9;--foam:#dff8ff;--ink:#09324a;--accent:#ffcf3f}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:linear-gradient(#73d6ff,#dff8ff);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;touch-action:none}
+  #game{display:block;width:100vw;height:100vh}
+  .hud{position:fixed;inset:0;pointer-events:none;padding:16px;display:flex;justify-content:space-between;align-items:flex-start;z-index:5}
+  .pill{background:rgba(7,52,77,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:10px 14px;border-radius:16px;font-weight:800;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+  .center{position:fixed;inset:0;display:grid;place-items:center;z-index:8;background:linear-gradient(rgba(7,65,100,.18),rgba(0,49,80,.32));padding:22px}
+  .card{width:min(92vw,430px);background:rgba(5,49,74,.8);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.2);border-radius:28px;padding:26px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  h1{margin:0 0 8px;font-size:clamp(30px,8vw,52px);line-height:.95;letter-spacing:-1.5px}
+  p{margin:10px 0 18px;opacity:.9;line-height:1.45}
+  button{pointer-events:auto;border:0;border-radius:18px;background:linear-gradient(180deg,#ffe66f,#ffbd2f);color:#4d3700;font-size:18px;font-weight:900;padding:14px 22px;box-shadow:0 8px 0 #d28e0f,0 16px 30px rgba(0,0,0,.18);cursor:pointer}
+  button:active{transform:translateY(4px);box-shadow:0 4px 0 #d28e0f,0 8px 18px rgba(0,0,0,.18)}
+  .hint{font-size:13px;opacity:.72;margin-top:16px}
+  .hidden{display:none}
+  .controls{position:fixed;left:0;right:0;bottom:18px;display:flex;justify-content:center;gap:18px;z-index:6;pointer-events:none}
+  .ctrl{pointer-events:auto;width:72px;height:72px;border-radius:50%;display:grid;place-items:center;background:rgba(8,76,113,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.28);font-size:30px;font-weight:900;user-select:none;-webkit-user-select:none}
+  @media (min-width:800px){.controls{opacity:.5}.ctrl{width:64px;height:64px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+  <div class="pill">⭐ <span id="score">0</span></div>
+  <div class="pill">❤️ <span id="lives">3</span></div>
+</div>
+<div class="controls">
+  <div class="ctrl" id="left">◀</div>
+  <div class="ctrl" id="right">▶</div>
+</div>
+<div class="center" id="overlay">
+  <div class="card">
+    <h1>WATER PARK<br>RUSH 🌊</h1>
+    <p>Slide through the park, grab coins, dodge floaties, and survive as the water gets faster.</p>
+    <button id="startBtn">START SLIDING</button>
+    <div class="hint">Keyboard: ← → &nbsp; • &nbsp; Mobile: hold the buttons</div>
+  </div>
+</div>
+<script>
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),overlay=document.getElementById('overlay'),startBtn=document.getElementById('startBtn');
+let W=0,H=0,dpr=1,running=false,last=0,score=0,lives=3,speed=300,spawnTimer=0,coinTimer=0,shake=0;
+let left=false,right=false;
+const player={x:0,y:0,w:46,h:58,vx:0};
+const obstacles=[],coins=[],splashes=[];
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0);player.y=H*.76;if(!player.x)player.x=W/2}
+addEventListener('resize',resize);resize();
+function reset(){score=0;lives=3;speed=300;spawnTimer=0;coinTimer=.4;obstacles.length=coins.length=splashes.length=0;player.x=W/2;player.vx=0;scoreEl.textContent=0;livesEl.textContent=3;running=true;last=performance.now();requestAnimationFrame(loop)}
+startBtn.onclick=()=>{overlay.classList.add('hidden');reset()};
+function bindHold(el,on,off){['pointerdown','touchstart'].forEach(e=>el.addEventListener(e,a=>{a.preventDefault();on()}));['pointerup','pointercancel','pointerleave','touchend'].forEach(e=>el.addEventListener(e,a=>{a.preventDefault();off()}))}
+bindHold(document.getElementById('left'),()=>left=true,()=>left=false);bindHold(document.getElementById('right'),()=>right=true,()=>right=false);
+addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='a')left=true;if(e.key==='ArrowRight'||e.key==='d')right=true});
+addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='a')left=false;if(e.key==='ArrowRight'||e.key==='d')right=false});
+function laneX(t,y){const curve=Math.sin(y*.006+t*.00075)*W*.08;return W/2+curve}
+function waterBounds(t,y){const cx=laneX(t,y),half=Math.min(W*.38,260);return [cx-half,cx+half]}
+function spawnObstacle(){const y=-80,b=waterBounds(performance.now(),y),x=b[0]+50+Math.random()*(b[1]-b[0]-100);obstacles.push({x,y,r:24+Math.random()*12,spin:Math.random()*6,type:Math.random()>.5?'ring':'duck'})}
+function spawnCoin(){const y=-40,b=waterBounds(performance.now(),y),x=b[0]+35+Math.random()*(b[1]-b[0]-70);coins.push({x,y,r:12,p:Math.random()*6})}
+function hitCircleRect(c,r){const nx=Math.max(r.x-r.w/2,Math.min(c.x,r.x+r.w/2)),ny=Math.max(r.y-r.h/2,Math.min(c.y,r.y+r.h/2)),dx=c.x-nx,dy=c.y-ny;return dx*dx+dy*dy<c.r*c.r}
+function splash(x,y,n=9){for(let i=0;i<n;i++)splashes.push({x,y,vx:(Math.random()-.5)*180,vy:-Math.random()*180-40,life:.6+Math.random()*.4,r:2+Math.random()*4})}
+function update(dt,t){speed=Math.min(650,300+score*2.2);const accel=900,max=360;if(left)player.vx-=accel*dt;if(right)player.vx+=accel*dt;if(!left&&!right)player.vx*=Math.pow(.02,dt);player.vx=Math.max(-max,Math.min(max,player.vx));player.x+=player.vx*dt;const b=waterBounds(t,player.y);player.x=Math.max(b[0]+28,Math.min(b[1]-28,player.x));
+spawnTimer-=dt;coinTimer-=dt;if(spawnTimer<=0){spawnObstacle();spawnTimer=Math.max(.45,1.15-speed/900)+Math.random()*.35}if(coinTimer<=0){spawnCoin();coinTimer=.45+Math.random()*.55}
+for(let i=obstacles.length-1;i>=0;i--){const o=obstacles[i];o.y+=speed*dt;o.spin+=dt*2;if(o.y>H+80){obstacles.splice(i,1);continue}if(hitCircleRect(o,player)){obstacles.splice(i,1);lives--;livesEl.textContent=lives;shake=.25;splash(player.x,player.y,16);if(lives<=0)return gameOver()}}
+for(let i=coins.length-1;i>=0;i--){const c=coins[i];c.y+=speed*dt;c.p+=dt*6;if(c.y>H+40){coins.splice(i,1);continue}if(hitCircleRect(c,player)){coins.splice(i,1);score+=10;scoreEl.textContent=score;splash(c.x,c.y,7)}}
+for(let i=splashes.length-1;i>=0;i--){const s=splashes[i];s.life-=dt;s.x+=s.vx*dt;s.y+=s.vy*dt;s.vy+=380*dt;if(s.life<=0)splashes.splice(i,1)}score+=dt*2;scoreEl.textContent=Math.floor(score)}
+function gameOver(){running=false;overlay.classList.remove('hidden');overlay.querySelector('h1').innerHTML='SPLASHED OUT 💦';overlay.querySelector('p').textContent='Score: '+Math.floor(score)+'. Tap below and send it again.';startBtn.textContent='TRY AGAIN'}
+function draw(t){ctx.clearRect(0,0,W,H);if(shake>0){shake-=1/60;ctx.save();ctx.translate((Math.random()-.5)*10,(Math.random()-.5)*10)}
+const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#69d4ff');sky.addColorStop(1,'#d7f5ff');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+// distant park
+ctx.fillStyle='#63c96a';ctx.fillRect(0,H*.18,W,H*.14);for(let i=0;i<8;i++){const x=(i*137+t*.01)% (W+180)-90;ctx.fillStyle=i%2?'#ff6e7d':'#ffd24f';ctx.beginPath();ctx.arc(x,H*.2,18,0,Math.PI*2);ctx.fill();ctx.fillStyle='#28546b';ctx.fillRect(x-3,H*.2,6,40)}
+// water slide ribbon
+ctx.beginPath();for(let y=-30;y<=H+40;y+=18){const b=waterBounds(t,y);if(y===-30)ctx.moveTo(b[0],y);else ctx.lineTo(b[0],y)}for(let y=H+40;y>=-30;y-=18){const b=waterBounds(t,y);ctx.lineTo(b[1],y)}ctx.closePath();const wg=ctx.createLinearGradient(0,0,W,0);wg.addColorStop(0,'#0f8fd4');wg.addColorStop(.5,'#26c9ef');wg.addColorStop(1,'#0b88d0');ctx.fillStyle=wg;ctx.fill();ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=5;ctx.stroke();
+for(let y=(t*.18)%70-70;y<H;y+=70){const b=waterBounds(t,y);ctx.strokeStyle='rgba(255,255,255,.28)';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(b[0]+18,y);ctx.quadraticCurveTo((b[0]+b[1])/2,y+10,b[1]-18,y);ctx.stroke()}
+// coins
+for(const c of coins){ctx.save();ctx.translate(c.x,c.y);ctx.scale(1,.78+Math.sin(c.p)*.14);ctx.fillStyle='#ffd83d';ctx.beginPath();ctx.arc(0,0,c.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff1a6';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#c88700';ctx.font='bold 14px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',0,1);ctx.restore()}
+// obstacles
+for(const o of obstacles){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(Math.sin(o.spin)*.25);if(o.type==='ring'){ctx.strokeStyle='#ff6575';ctx.lineWidth=12;ctx.beginPath();ctx.arc(0,0,o.r,0,Math.PI*2);ctx.stroke();ctx.strokeStyle='#fff';ctx.lineWidth=4;ctx.setLineDash([12,10]);ctx.stroke();ctx.setLineDash([])}else{ctx.fillStyle='#ffd94a';ctx.beginPath();ctx.arc(0,0,o.r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ff8b2d';ctx.beginPath();ctx.moveTo(o.r*.65,-2);ctx.lineTo(o.r*1.15,6);ctx.lineTo(o.r*.65,12);ctx.fill();ctx.fillStyle='#17394c';ctx.beginPath();ctx.arc(o.r*.25,-o.r*.25,3,0,Math.PI*2);ctx.fill()}ctx.restore()}
+// player tube + rider
+ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.vx*.0007);ctx.fillStyle='#ff4f76';ctx.beginPath();ctx.ellipse(0,14,32,22,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#b71f49';ctx.beginPath();ctx.ellipse(0,14,15,9,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ffd1b3';ctx.beginPath();ctx.arc(0,-12,11,0,Math.PI*2);ctx.fill();ctx.fillStyle='#17394c';ctx.fillRect(-9,-25,18,10);ctx.fillStyle='#ffffff';ctx.fillRect(-8,-2,16,18);ctx.restore();
+for(const s of splashes){ctx.globalAlpha=Math.max(0,s.life);ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;if(shake>0)ctx.restore()}
+function loop(t){if(!running)return;const dt=Math.min(.033,(t-last)/1000||0);last=t;update(dt,t);draw(t);if(running)requestAnimationFrame(loop)}
+draw(performance.now());
+</script>
+</body>
+</html>
